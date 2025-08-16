@@ -1,7 +1,7 @@
 const TelegramBot = require('node-telegram-bot-api');
 
 // تنظیمات
-const TOKEN = '8392395396:AAHtIxrBmdewx2HH86UuSfoT4rBIk9Rir1M'; // توکن ربات خود را اینجا قرار دهید
+const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const WEBAPP_URL = 'https://game-bot2.github.io/tonbolla-01/'; // آدرس بازی شما
 
 const bot = new TelegramBot(TOKEN, { 
