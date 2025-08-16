@@ -6,6 +6,7 @@
     <title>Tonbolla Game</title>
     <link href="https://fonts.googleapis.com/css2?family=Raleway:wght@400;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://unpkg.com/@tonconnect/sdk@latest/dist/tonconnect-sdk.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -55,6 +56,11 @@
             padding: 5px 10px;
             border-radius: 15px;
             cursor: pointer;
+        }
+        
+        #wallet-address {
+            font-size: 0.9rem;
+            margin-right: 5px;
         }
         
         #language-selector {
@@ -789,6 +795,7 @@
             language: 'en',
             walletConnected: false,
             tonBalance: 0,
+            walletAddress: '',
             ownedCards: [],
             allCards: [],
             winners: [
@@ -806,6 +813,624 @@
             hasJoinedGroup: localStorage.getItem('hasJoinedGroup') === 'true',
             hasJoinedChannel: localStorage.getItem('hasJoinedChannel') === 'true'
         };
+
+        // ایجاد connector برای اتصال به کیف پول
+        const connector = new TonConnectSDK.TonConnect({
+            manifestUrl: 'https://raw.githubusercontent.com/ton-connect/demo-dapp/master/public/tonconnect-manifest.json'
+        });
+
+        // Initialize the app
+        async function init() {
+            // Generate all unique cards once
+            gameState.allCards = generateTonbollaCards();
+            
+            // Initialize TON Connect
+            try {
+                await connector.restoreConnection();
+                if (connector.connected) {
+                    const wallet = connector.wallet;
+                    gameState.walletConnected = true;
+                    gameState.walletAddress = wallet.account.address;
+                    await fetchWalletBalance(wallet.account.address);
+                    updateWalletInfo();
+                }
+            } catch (e) {
+                console.error('Error restoring TON connection:', e);
+            }
+            
+            // Hide splash screen after 2 seconds
+            setTimeout(() => {
+                document.getElementById('splash').style.display = 'none';
+                showPage('main-menu');
+                startTimer();
+            }, 2000);
+            
+            // Set up wallet connection
+            document.getElementById('connect-wallet').addEventListener('click', toggleWalletConnection);
+            
+            // Set up language selector
+            document.getElementById('language-btn').addEventListener('click', toggleLanguageMenu);
+            document.querySelectorAll('.language-option').forEach(option => {
+                option.addEventListener('click', () => changeLanguage(option.dataset.lang));
+            });
+            
+            // Set up menu buttons
+            document.getElementById('home-btn').addEventListener('click', () => showPage('main-menu'));
+            document.getElementById('buy-card-btn').addEventListener('click', () => showPage('buy-cards-page'));
+            document.getElementById('show-cards-btn').addEventListener('click', () => showPage('show-cards-page'));
+            document.getElementById('winners-btn').addEventListener('click', () => showPage('winners-page'));
+            document.getElementById('invite-btn').addEventListener('click', () => showPage('invite-page'));
+            document.getElementById('play-button').addEventListener('click', startGame);
+            
+            // Set up task button
+            document.getElementById('task-btn').addEventListener('click', showTaskModal);
+            
+            // Set up task modal buttons
+            document.getElementById('join-group-btn').addEventListener('click', function() {
+                gameState.hasJoinedGroup = true;
+                localStorage.setItem('hasJoinedGroup', 'true');
+                updateTaskModal();
+            });
+            
+            document.getElementById('join-channel-btn').addEventListener('click', function() {
+                gameState.hasJoinedChannel = true;
+                localStorage.setItem('hasJoinedChannel', 'true');
+                updateTaskModal();
+            });
+            
+            document.getElementById('close-task-btn').addEventListener('click', function() {
+                document.getElementById('task-modal').style.display = 'none';
+            });
+            
+            // Set up copy invite button
+            document.getElementById('copy-invite').addEventListener('click', function() {
+                copyInviteCode();
+                simulateInvite();
+            });
+            
+            // Initial render
+            updateUI();
+        }
+        
+        // تابع برای اتصال/قطع اتصال کیف پول
+        async function toggleWalletConnection() {
+            if (connector.connected) {
+                // قطع اتصال کیف پول
+                await connector.disconnect();
+                gameState.walletConnected = false;
+                gameState.walletAddress = '';
+                gameState.tonBalance = 0;
+                updateWalletInfo();
+            } else {
+                // نمایش مدال اتصال کیف پول
+                const modal = await connector.connect();
+                modal.onStatusChange(wallet => {
+                    if (wallet) {
+                        gameState.walletConnected = true;
+                        gameState.walletAddress = wallet.account.address;
+                        fetchWalletBalance(wallet.account.address);
+                        updateWalletInfo();
+                    } else {
+                        gameState.walletConnected = false;
+                        gameState.walletAddress = '';
+                        gameState.tonBalance = 0;
+                        updateWalletInfo();
+                    }
+                });
+            }
+        }
+        
+        // تابع برای به‌روزرسانی اطلاعات کیف پول در رابط کاربری
+        function updateWalletInfo() {
+            const walletInfoEl = document.getElementById('wallet-info');
+            
+            if (gameState.walletConnected) {
+                // کوتاه کردن آدرس کیف پول برای نمایش
+                const shortAddress = gameState.walletAddress.slice(0, 4) + '...' + gameState.walletAddress.slice(-4);
+                
+                walletInfoEl.innerHTML = `
+                    <div id="wallet-amount">${gameState.tonBalance.toFixed(2)} TON</div>
+                    <div id="wallet-address">${shortAddress}</div>
+                    <button id="connect-wallet" style="background:#e74c3c;">Disconnect</button>
+                `;
+                
+                // افزودن مجدد ایونت‌لیسنر برای دکمه قطع اتصال
+                document.getElementById('connect-wallet').addEventListener('click', toggleWalletConnection);
+            } else {
+                walletInfoEl.innerHTML = `
+                    <div id="wallet-amount">0 TON</div>
+                    <button id="connect-wallet">Connect Wallet</button>
+                `;
+                
+                // افزودن مجدد ایونت‌لیسنر برای دکمه اتصال
+                document.getElementById('connect-wallet').addEventListener('click', toggleWalletConnection);
+            }
+        }
+        
+        // تابع برای دریافت موجودی کیف پول از بلاکچین
+        async function fetchWalletBalance(walletAddress) {
+            try {
+                // استفاده از API عمومی TON برای دریافت موجودی
+                const response = await fetch(`https://tonapi.io/v1/account/getInfo?account=${walletAddress}`);
+                const data = await response.json();
+                
+                if (data && data.balance) {
+                    // تبدیل موجودی از نانو TON به TON
+                    gameState.tonBalance = data.balance / 1000000000;
+                    updateWalletInfo();
+                }
+            } catch (error) {
+                console.error('Error fetching wallet balance:', error);
+                // نمایش موجودی آزمایشی در صورت خطا
+                gameState.tonBalance = Math.floor(Math.random() * 100);
+                updateWalletInfo();
+            }
+        }
+        
+        // Show specific page
+        function showPage(pageId) {
+            // Hide all pages
+            document.querySelectorAll('.page, #main-menu').forEach(el => {
+                el.style.display = 'none';
+            });
+            
+            // Show selected page
+            if (pageId === 'main-menu') {
+                document.getElementById('main-menu').style.display = 'flex';
+            } else {
+                document.getElementById(pageId).style.display = pageId === 'game-play-page' ? 'flex' : 'block';
+            }
+            
+            // Show/hide task button
+            if (pageId === 'main-menu') {
+                document.getElementById('task-button-container').style.display = 'block';
+            } else {
+                document.getElementById('task-button-container').style.display = 'none';
+            }
+            
+            // Update active button
+            document.querySelectorAll('#bottom-menu .menu-button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            if (pageId === 'main-menu') {
+                document.getElementById('home-btn').classList.add('active');
+            } else if (pageId === 'buy-cards-page') {
+                document.getElementById('buy-card-btn').classList.add('active');
+                loadBuyCardsPage();
+            } else if (pageId === 'show-cards-page') {
+                document.getElementById('show-cards-btn').classList.add('active');
+                loadShowCardsPage();
+            } else if (pageId === 'winners-page') {
+                document.getElementById('winners-btn').classList.add('active');
+                loadWinnersPage();
+            } else if (pageId === 'invite-page') {
+                document.getElementById('invite-btn').classList.add('active');
+            } else if (pageId === 'game-play-page') {
+                // No button active during game play
+            }
+            
+            // Update current page
+            gameState.currentPage = pageId;
+        }
+        
+        // Show task modal
+        function showTaskModal() {
+            const modal = document.getElementById('task-modal');
+            modal.style.display = 'flex';
+            updateTaskModal();
+        }
+        
+        // Update task modal status
+        function updateTaskModal() {
+            const groupStatus = document.getElementById('group-status');
+            const channelStatus = document.getElementById('channel-status');
+            
+            const t = translations[gameState.language].task;
+            
+            if (gameState.hasJoinedGroup) {
+                groupStatus.innerHTML = '<div class="joined">✓ Joined</div>';
+                document.getElementById('join-group-btn').style.display = 'none';
+            } else {
+                groupStatus.innerHTML = '';
+                document.getElementById('join-group-btn').style.display = 'block';
+                document.getElementById('join-group-btn').textContent = t.joinGroup;
+            }
+            
+            if (gameState.hasJoinedChannel) {
+                channelStatus.innerHTML = '<div class="joined">✓ Joined</div>';
+                document.getElementById('join-channel-btn').style.display = 'none';
+            } else {
+                channelStatus.innerHTML = '';
+                document.getElementById('join-channel-btn').style.display = 'block';
+                document.getElementById('join-channel-btn').textContent = t.joinChannel;
+            }
+        }
+        
+        // Timer function - Updated to use UTC
+        function startTimer() {
+            // Get current UTC time
+            const now = new Date();
+            const currentUTCHours = now.getUTCHours();
+            const currentUTCMinutes = now.getUTCMinutes();
+            const currentUTCSeconds = now.getUTCSeconds();
+            
+            // Calculate seconds until next full hour (UTC)
+            let secondsUntilNextHour = 3600 - (currentUTCMinutes * 60 + currentUTCSeconds);
+            
+            function updateTimer() {
+                const hours = Math.floor(secondsUntilNextHour / 3600);
+                const minutes = Math.floor((secondsUntilNextHour % 3600) / 60);
+                const secs = secondsUntilNextHour % 60;
+                
+                document.getElementById('timer').textContent = 
+                    `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+                
+                if (secondsUntilNextHour <= 0) {
+                    document.getElementById('play-button').disabled = false;
+                    // Reset for next hour
+                    secondsUntilNextHour = 3600;
+                }
+                
+                secondsUntilNextHour--;
+                setTimeout(updateTimer, 1000);
+            }
+            
+            updateTimer();
+        }
+        
+        // Start the game
+        function startGame() {
+            if (!gameState.hasPurchasedCard) {
+                alert("You need to purchase a card first!");
+                showPage('buy-cards-page');
+                return;
+            }
+            
+            // Get the player's card
+            gameState.currentPlayerCard = gameState.allCards.find(card => 
+                card.id === gameState.ownedCards[gameState.ownedCards.length - 1]
+            );
+            
+            gameState.gameInProgress = true;
+            gameState.calledNumbers = [];
+            gameState.markedNumbers = [];
+            
+            showPage('game-play-page');
+            displayPlayerCard();
+            startNumberCalling();
+        }
+        
+        // Display player's card in game view
+        function displayPlayerCard() {
+            const container = document.getElementById('game-card-container');
+            container.innerHTML = '';
+            
+            const card = gameState.currentPlayerCard;
+            if (!card) return;
+            
+            const cardEl = document.createElement('div');
+            cardEl.className = 'tonbolla-card';
+            
+            let gridHTML = '';
+            card.numbers.forEach((num, index) => {
+                const isMarked = gameState.markedNumbers.includes(index);
+                gridHTML += num 
+                    ? `<div class="number-cell ${isMarked ? 'marked-number' : ''}" data-index="${index}" data-number="${num}">
+                        ${num}
+                        ${isMarked ? '<div class="bean"></div>' : ''}
+                       </div>`
+                    : `<div class="number-cell empty-cell"></div>`;
+            });
+            
+            cardEl.innerHTML = `
+                <div class="card-header">Your Card #${card.id}</div>
+                <div class="card-grid">
+                    ${gridHTML}
+                </div>
+            `;
+            
+            // Add click event to number cells
+            cardEl.querySelectorAll('.number-cell').forEach(cell => {
+                if (cell.dataset.number) {
+                    cell.addEventListener('click', () => markNumber(cell));
+                }
+            });
+            
+            container.appendChild(cardEl);
+        }
+        
+        // Mark a number on the card
+        function markNumber(cell) {
+            const currentNumber = document.getElementById('current-number').textContent;
+            const cellNumber = cell.dataset.number;
+            const index = cell.dataset.index;
+            
+            if (currentNumber === cellNumber && !gameState.markedNumbers.includes(parseInt(index))) {
+                gameState.markedNumbers.push(parseInt(index));
+                displayPlayerCard();
+                
+                const t = translations[gameState.language].game;
+                document.getElementById('announcement').textContent = t.matchFound;
+            }
+        }
+        
+        // Start calling numbers every 5 seconds
+        function startNumberCalling() {
+            // Initial call
+            callNextNumber();
+            
+            // Set interval for subsequent calls
+            gameState.numberCallInterval = setInterval(callNextNumber, 5000);
+        }
+        
+        // Call the next random number
+        function callNextNumber() {
+            // Generate a random number between 10-99 that hasn't been called yet
+            const availableNumbers = Array.from({length: 90}, (_, i) => i + 10)
+                .filter(num => !gameState.calledNumbers.includes(num));
+            
+            if (availableNumbers.length === 0) {
+                endGame();
+                return;
+            }
+            
+            const randomIndex = Math.floor(Math.random() * availableNumbers.length);
+            const calledNumber = availableNumbers[randomIndex];
+            gameState.calledNumbers.push(calledNumber);
+            
+            // Display the called number
+            const currentNumberEl = document.getElementById('current-number');
+            currentNumberEl.textContent = calledNumber;
+            currentNumberEl.classList.add('pulse');
+            
+            // Add to called numbers list
+            updateCalledNumbersDisplay();
+            
+            setTimeout(() => {
+                currentNumberEl.classList.remove('pulse');
+            }, 500);
+            
+            // Clear previous announcement
+            document.getElementById('announcement').textContent = '';
+        }
+        
+        // Update the called numbers display
+        function updateCalledNumbersDisplay() {
+            const container = document.getElementById('called-numbers');
+            container.innerHTML = '';
+            
+            gameState.calledNumbers.forEach(num => {
+                const numEl = document.createElement('div');
+                numEl.className = 'called-number';
+                numEl.textContent = num;
+                container.appendChild(numEl);
+            });
+        }
+        
+        // End the game
+        function endGame() {
+            clearInterval(gameState.numberCallInterval);
+            const t = translations[gameState.language].game;
+            document.getElementById('announcement').textContent = t.gameOver;
+            gameState.gameInProgress = false;
+        }
+        
+        // Toggle language menu
+        function toggleLanguageMenu() {
+            const options = document.getElementById('language-options');
+            options.style.display = options.style.display === 'block' ? 'none' : 'block';
+        }
+        
+        // Change language
+        function changeLanguage(lang) {
+            gameState.language = lang;
+            document.getElementById('language-btn').textContent = lang.toUpperCase();
+            document.getElementById('language-options').style.display = 'none';
+            updateUI();
+        }
+        
+        // Copy invite code
+        function copyInviteCode() {
+            const inviteCode = "TONBOLLA";
+            navigator.clipboard.writeText(inviteCode).then(() => {
+                const t = translations[gameState.language].invite;
+                alert(t.copied);
+            });
+        }
+        
+        // Simulate inviting friends
+        function simulateInvite() {
+            gameState.invitedFriends += 5;
+            updateInviteStats();
+            
+            // Display success message
+            const t = translations[gameState.language].invite;
+            alert(`${t.success} +5 friends! Total invited: ${gameState.invitedFriends}`);
+        }
+        
+        // Update invite stats display
+        function updateInviteStats() {
+            document.querySelector('.friends-count').textContent = gameState.invitedFriends;
+        }
+        
+        // Generate Tonbolla cards (4x4 grid with 12 numbers and 4 empty cells)
+        function generateTonbollaCards() {
+            const cards = [];
+            const allNumbers = Array.from({length: 90}, (_, i) => i + 10);
+            
+            for (let cardId = 1; cardId <= 100; cardId++) {
+                // Create a copy of all numbers and shuffle
+                const shuffledNumbers = [...allNumbers].sort(() => Math.random() - 0.5);
+                
+                // Take first 12 numbers for this card
+                const cardNumbers = shuffledNumbers.slice(0, 12);
+                
+                // Create 4x4 grid with 4 empty cells
+                const grid = Array(16).fill(null);
+                const positions = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15];
+                const numberPositions = [...positions].sort(() => Math.random() - 0.5).slice(0, 12);
+                
+                numberPositions.forEach((pos, idx) => {
+                    grid[pos] = cardNumbers[idx];
+                });
+                
+                cards.push({
+                    id: cardId,
+                    numbers: grid,
+                    sold: false
+                });
+            }
+            
+            return cards;
+        }
+        
+        // Load buy cards page
+        function loadBuyCardsPage() {
+            const container = document.getElementById('cards-container');
+            container.innerHTML = '';
+            
+            // Display all 100 cards
+            gameState.allCards.forEach(card => {
+                const cardEl = document.createElement('div');
+                cardEl.className = 'tonbolla-card';
+                
+                let gridHTML = '';
+                card.numbers.forEach(num => {
+                    gridHTML += num 
+                        ? `<div class="number-cell">${num}</div>`
+                        : `<div class="number-cell empty-cell"></div>`;
+                });
+                
+                const isOwned = gameState.ownedCards.includes(card.id);
+                const isSold = card.sold || isOwned;
+                
+                cardEl.innerHTML = `
+                    <div class="card-header">Card #${card.id}</div>
+                    <div class="card-grid">
+                        ${gridHTML}
+                    </div>
+                    <div class="card-footer">
+                        <button class="buy-button" data-card-id="${card.id}" ${isSold ? 'disabled' : ''}>
+                            ${isSold ? translations[gameState.language].buyCards.sold : translations[gameState.language].buyCards.buyButton}
+                        </button>
+                    </div>
+                    ${isSold ? `<div class="sold-overlay">${translations[gameState.language].buyCards.sold}</div>` : ''}
+                `;
+                
+                // Add buy button event if not sold
+                if (!isSold) {
+                    cardEl.querySelector('.buy-button').addEventListener('click', function() {
+                        buyCard(parseInt(this.dataset.cardId));
+                    });
+                }
+                
+                container.appendChild(cardEl);
+            });
+        }
+        
+        // Buy a card
+        function buyCard(cardId) {
+            if (!gameState.walletConnected) {
+                alert("Please connect your wallet first");
+                return;
+            }
+            
+            // Check if user has joined Telegram group and channel
+            if (!gameState.hasJoinedGroup || !gameState.hasJoinedChannel) {
+                const t = translations[gameState.language].task;
+                alert(t.mustJoin);
+                showTaskModal();
+                return;
+            }
+            
+            if (gameState.tonBalance < 1) {
+                alert("Not enough TON balance");
+                return;
+            }
+            
+            if (gameState.hasPurchasedCard) {
+                alert("You can only purchase one card per game");
+                return;
+            }
+            
+            // Find the card
+            const card = gameState.allCards.find(c => c.id === cardId);
+            if (!card || card.sold) {
+                alert("This card is no longer available");
+                return;
+            }
+            
+            // Mark as sold
+            card.sold = true;
+            
+            // Simulate purchase
+            gameState.tonBalance -= 1;
+            gameState.ownedCards.push(cardId);
+            gameState.hasPurchasedCard = true;
+            
+            updateUI();
+            loadBuyCardsPage();
+            alert("Card purchased successfully!");
+        }
+        
+        // Load show cards page
+        function loadShowCardsPage() {
+            const container = document.getElementById('owned-cards-container');
+            container.innerHTML = '';
+            
+            if (gameState.ownedCards.length === 0) {
+                const t = translations[gameState.language].showCards;
+                container.innerHTML = `<p>${t.title} - You have no cards yet</p>`;
+                return;
+            }
+            
+            gameState.ownedCards.forEach(cardId => {
+                const card = gameState.allCards.find(c => c.id === cardId);
+                if (!card) return;
+                
+                const cardEl = document.createElement('div');
+                cardEl.className = 'tonbolla-card';
+                
+                let gridHTML = '';
+                card.numbers.forEach(num => {
+                    gridHTML += num 
+                        ? `<div class="number-cell">${num}</div>`
+                        : `<div class="number-cell empty-cell"></div>`;
+                });
+                
+                cardEl.innerHTML = `
+                    <div class="card-header">Card #${card.id}</div>
+                    <div class="card-grid">
+                        ${gridHTML}
+                    </div>
+                `;
+                
+                container.appendChild(cardEl);
+            });
+        }
+        
+        // Load winners page
+        function loadWinnersPage() {
+            const container = document.getElementById('winners-list');
+            container.innerHTML = '';
+            
+            gameState.winners.forEach(winner => {
+                const winnerEl = document.createElement('div');
+                winnerEl.className = 'tonbolla-card';
+                winnerEl.style.margin = '10px auto';
+                winnerEl.style.maxWidth = '500px';
+                
+                winnerEl.innerHTML = `
+                    <div style="display: flex; justify-content: space-between;">
+                        <div>${winner.address}</div>
+                        <div style="font-weight: bold;">${winner.prize}</div>
+                    </div>
+                `;
+                
+                container.appendChild(winnerEl);
+            });
+        }
         
         // Translations (fixed for all languages)
         const translations = {
@@ -1243,558 +1868,12 @@
             }
         };
         
-        // Initialize the app
-        function init() {
-            // Generate all unique cards once
-            gameState.allCards = generateTonbollaCards();
-            
-            // Hide splash screen after 2 seconds
-            setTimeout(() => {
-                document.getElementById('splash').style.display = 'none';
-                showPage('main-menu');
-                startTimer();
-            }, 2000);
-            
-            // Set up wallet connection
-            document.getElementById('connect-wallet').addEventListener('click', toggleWalletConnection);
-            
-            // Set up language selector
-            document.getElementById('language-btn').addEventListener('click', toggleLanguageMenu);
-            document.querySelectorAll('.language-option').forEach(option => {
-                option.addEventListener('click', () => changeLanguage(option.dataset.lang));
-            });
-            
-            // Set up menu buttons
-            document.getElementById('home-btn').addEventListener('click', () => showPage('main-menu'));
-            document.getElementById('buy-card-btn').addEventListener('click', () => showPage('buy-cards-page'));
-            document.getElementById('show-cards-btn').addEventListener('click', () => showPage('show-cards-page'));
-            document.getElementById('winners-btn').addEventListener('click', () => showPage('winners-page'));
-            document.getElementById('invite-btn').addEventListener('click', () => showPage('invite-page'));
-            document.getElementById('play-button').addEventListener('click', startGame);
-            
-            // Set up task button
-            document.getElementById('task-btn').addEventListener('click', showTaskModal);
-            
-            // Set up task modal buttons
-            document.getElementById('join-group-btn').addEventListener('click', function() {
-                gameState.hasJoinedGroup = true;
-                localStorage.setItem('hasJoinedGroup', 'true');
-                updateTaskModal();
-            });
-            
-            document.getElementById('join-channel-btn').addEventListener('click', function() {
-                gameState.hasJoinedChannel = true;
-                localStorage.setItem('hasJoinedChannel', 'true');
-                updateTaskModal();
-            });
-            
-            document.getElementById('close-task-btn').addEventListener('click', function() {
-                document.getElementById('task-modal').style.display = 'none';
-            });
-            
-            // Set up copy invite button
-            document.getElementById('copy-invite').addEventListener('click', function() {
-                copyInviteCode();
-                simulateInvite();
-            });
-            
-            // Initial render
-            updateUI();
-        }
-        
-        // Show specific page
-        function showPage(pageId) {
-            // Hide all pages
-            document.querySelectorAll('.page, #main-menu').forEach(el => {
-                el.style.display = 'none';
-            });
-            
-            // Show selected page
-            if (pageId === 'main-menu') {
-                document.getElementById('main-menu').style.display = 'flex';
-            } else {
-                document.getElementById(pageId).style.display = pageId === 'game-play-page' ? 'flex' : 'block';
-            }
-            
-            // Show/hide task button
-            if (pageId === 'main-menu') {
-                document.getElementById('task-button-container').style.display = 'block';
-            } else {
-                document.getElementById('task-button-container').style.display = 'none';
-            }
-            
-            // Update active button
-            document.querySelectorAll('#bottom-menu .menu-button').forEach(btn => {
-                btn.classList.remove('active');
-            });
-            
-            if (pageId === 'main-menu') {
-                document.getElementById('home-btn').classList.add('active');
-            } else if (pageId === 'buy-cards-page') {
-                document.getElementById('buy-card-btn').classList.add('active');
-                loadBuyCardsPage();
-            } else if (pageId === 'show-cards-page') {
-                document.getElementById('show-cards-btn').classList.add('active');
-                loadShowCardsPage();
-            } else if (pageId === 'winners-page') {
-                document.getElementById('winners-btn').classList.add('active');
-                loadWinnersPage();
-            } else if (pageId === 'invite-page') {
-                document.getElementById('invite-btn').classList.add('active');
-            } else if (pageId === 'game-play-page') {
-                // No button active during game play
-            }
-            
-            // Update current page
-            gameState.currentPage = pageId;
-        }
-        
-        // Show task modal
-        function showTaskModal() {
-            const modal = document.getElementById('task-modal');
-            modal.style.display = 'flex';
-            updateTaskModal();
-        }
-        
-        // Update task modal status
-        function updateTaskModal() {
-            const groupStatus = document.getElementById('group-status');
-            const channelStatus = document.getElementById('channel-status');
-            
-            const t = translations[gameState.language].task;
-            
-            if (gameState.hasJoinedGroup) {
-                groupStatus.innerHTML = '<div class="joined">✓ Joined</div>';
-                document.getElementById('join-group-btn').style.display = 'none';
-            } else {
-                groupStatus.innerHTML = '';
-                document.getElementById('join-group-btn').style.display = 'block';
-                document.getElementById('join-group-btn').textContent = t.joinGroup;
-            }
-            
-            if (gameState.hasJoinedChannel) {
-                channelStatus.innerHTML = '<div class="joined">✓ Joined</div>';
-                document.getElementById('join-channel-btn').style.display = 'none';
-            } else {
-                channelStatus.innerHTML = '';
-                document.getElementById('join-channel-btn').style.display = 'block';
-                document.getElementById('join-channel-btn').textContent = t.joinChannel;
-            }
-        }
-        
-        // Timer function - Updated to use UTC
-        function startTimer() {
-            // Get current UTC time
-            const now = new Date();
-            const currentUTCHours = now.getUTCHours();
-            const currentUTCMinutes = now.getUTCMinutes();
-            const currentUTCSeconds = now.getUTCSeconds();
-            
-            // Calculate seconds until next full hour (UTC)
-            let secondsUntilNextHour = 3600 - (currentUTCMinutes * 60 + currentUTCSeconds);
-            
-            function updateTimer() {
-                const hours = Math.floor(secondsUntilNextHour / 3600);
-                const minutes = Math.floor((secondsUntilNextHour % 3600) / 60);
-                const secs = secondsUntilNextHour % 60;
-                
-                document.getElementById('timer').textContent = 
-                    `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-                
-                if (secondsUntilNextHour <= 0) {
-                    document.getElementById('play-button').disabled = false;
-                    // Reset for next hour
-                    secondsUntilNextHour = 3600;
-                }
-                
-                secondsUntilNextHour--;
-                setTimeout(updateTimer, 1000);
-            }
-            
-            updateTimer();
-        }
-        
-        // Start the game
-        function startGame() {
-            if (!gameState.hasPurchasedCard) {
-                alert("You need to purchase a card first!");
-                showPage('buy-cards-page');
-                return;
-            }
-            
-            // Get the player's card
-            gameState.currentPlayerCard = gameState.allCards.find(card => 
-                card.id === gameState.ownedCards[gameState.ownedCards.length - 1]
-            );
-            
-            gameState.gameInProgress = true;
-            gameState.calledNumbers = [];
-            gameState.markedNumbers = [];
-            
-            showPage('game-play-page');
-            displayPlayerCard();
-            startNumberCalling();
-        }
-        
-        // Display player's card in game view
-        function displayPlayerCard() {
-            const container = document.getElementById('game-card-container');
-            container.innerHTML = '';
-            
-            const card = gameState.currentPlayerCard;
-            if (!card) return;
-            
-            const cardEl = document.createElement('div');
-            cardEl.className = 'tonbolla-card';
-            
-            let gridHTML = '';
-            card.numbers.forEach((num, index) => {
-                const isMarked = gameState.markedNumbers.includes(index);
-                gridHTML += num 
-                    ? `<div class="number-cell ${isMarked ? 'marked-number' : ''}" data-index="${index}" data-number="${num}">
-                        ${num}
-                        ${isMarked ? '<div class="bean"></div>' : ''}
-                       </div>`
-                    : `<div class="number-cell empty-cell"></div>`;
-            });
-            
-            cardEl.innerHTML = `
-                <div class="card-header">Your Card #${card.id}</div>
-                <div class="card-grid">
-                    ${gridHTML}
-                </div>
-            `;
-            
-            // Add click event to number cells
-            cardEl.querySelectorAll('.number-cell').forEach(cell => {
-                if (cell.dataset.number) {
-                    cell.addEventListener('click', () => markNumber(cell));
-                }
-            });
-            
-            container.appendChild(cardEl);
-        }
-        
-        // Mark a number on the card
-        function markNumber(cell) {
-            const currentNumber = document.getElementById('current-number').textContent;
-            const cellNumber = cell.dataset.number;
-            const index = cell.dataset.index;
-            
-            if (currentNumber === cellNumber && !gameState.markedNumbers.includes(parseInt(index))) {
-                gameState.markedNumbers.push(parseInt(index));
-                displayPlayerCard();
-                
-                const t = translations[gameState.language].game;
-                document.getElementById('announcement').textContent = t.matchFound;
-            }
-        }
-        
-        // Start calling numbers every 5 seconds
-        function startNumberCalling() {
-            // Initial call
-            callNextNumber();
-            
-            // Set interval for subsequent calls
-            gameState.numberCallInterval = setInterval(callNextNumber, 5000);
-        }
-        
-        // Call the next random number
-        function callNextNumber() {
-            // Generate a random number between 10-99 that hasn't been called yet
-            const availableNumbers = Array.from({length: 90}, (_, i) => i + 10)
-                .filter(num => !gameState.calledNumbers.includes(num));
-            
-            if (availableNumbers.length === 0) {
-                endGame();
-                return;
-            }
-            
-            const randomIndex = Math.floor(Math.random() * availableNumbers.length);
-            const calledNumber = availableNumbers[randomIndex];
-            gameState.calledNumbers.push(calledNumber);
-            
-            // Display the called number
-            const currentNumberEl = document.getElementById('current-number');
-            currentNumberEl.textContent = calledNumber;
-            currentNumberEl.classList.add('pulse');
-            
-            // Add to called numbers list
-            updateCalledNumbersDisplay();
-            
-            setTimeout(() => {
-                currentNumberEl.classList.remove('pulse');
-            }, 500);
-            
-            // Clear previous announcement
-            document.getElementById('announcement').textContent = '';
-        }
-        
-        // Update the called numbers display
-        function updateCalledNumbersDisplay() {
-            const container = document.getElementById('called-numbers');
-            container.innerHTML = '';
-            
-            gameState.calledNumbers.forEach(num => {
-                const numEl = document.createElement('div');
-                numEl.className = 'called-number';
-                numEl.textContent = num;
-                container.appendChild(numEl);
-            });
-        }
-        
-        // End the game
-        function endGame() {
-            clearInterval(gameState.numberCallInterval);
-            const t = translations[gameState.language].game;
-            document.getElementById('announcement').textContent = t.gameOver;
-            gameState.gameInProgress = false;
-        }
-        
-        // Toggle wallet connection
-        function toggleWalletConnection() {
-            gameState.walletConnected = !gameState.walletConnected;
-            
-            if (gameState.walletConnected) {
-                // Simulate connecting to wallet
-                gameState.tonBalance = Math.floor(Math.random() * 100);
-            } else {
-                gameState.tonBalance = 0;
-            }
-            
-            updateUI();
-        }
-        
-        // Toggle language menu
-        function toggleLanguageMenu() {
-            const options = document.getElementById('language-options');
-            options.style.display = options.style.display === 'block' ? 'none' : 'block';
-        }
-        
-        // Change language
-        function changeLanguage(lang) {
-            gameState.language = lang;
-            document.getElementById('language-btn').textContent = lang.toUpperCase();
-            document.getElementById('language-options').style.display = 'none';
-            updateUI();
-        }
-        
-        // Copy invite code
-        function copyInviteCode() {
-            const inviteCode = "TONBOLLA";
-            navigator.clipboard.writeText(inviteCode).then(() => {
-                const t = translations[gameState.language].invite;
-                alert(t.copied);
-            });
-        }
-        
-        // Simulate inviting friends
-        function simulateInvite() {
-            gameState.invitedFriends += 5;
-            updateInviteStats();
-            
-            // Display success message
-            const t = translations[gameState.language].invite;
-            alert(`${t.success} +5 friends! Total invited: ${gameState.invitedFriends}`);
-        }
-        
-        // Update invite stats display
-        function updateInviteStats() {
-            document.querySelector('.friends-count').textContent = gameState.invitedFriends;
-        }
-        
-        // Generate Tonbolla cards (4x4 grid with 12 numbers and 4 empty cells)
-        function generateTonbollaCards() {
-            const cards = [];
-            const allNumbers = Array.from({length: 90}, (_, i) => i + 10);
-            
-            for (let cardId = 1; cardId <= 100; cardId++) {
-                // Create a copy of all numbers and shuffle
-                const shuffledNumbers = [...allNumbers].sort(() => Math.random() - 0.5);
-                
-                // Take first 12 numbers for this card
-                const cardNumbers = shuffledNumbers.slice(0, 12);
-                
-                // Create 4x4 grid with 4 empty cells
-                const grid = Array(16).fill(null);
-                const positions = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15];
-                const numberPositions = [...positions].sort(() => Math.random() - 0.5).slice(0, 12);
-                
-                numberPositions.forEach((pos, idx) => {
-                    grid[pos] = cardNumbers[idx];
-                });
-                
-                cards.push({
-                    id: cardId,
-                    numbers: grid,
-                    sold: false
-                });
-            }
-            
-            return cards;
-        }
-        
-        // Load buy cards page
-        function loadBuyCardsPage() {
-            const container = document.getElementById('cards-container');
-            container.innerHTML = '';
-            
-            // Display all 100 cards
-            gameState.allCards.forEach(card => {
-                const cardEl = document.createElement('div');
-                cardEl.className = 'tonbolla-card';
-                
-                let gridHTML = '';
-                card.numbers.forEach(num => {
-                    gridHTML += num 
-                        ? `<div class="number-cell">${num}</div>`
-                        : `<div class="number-cell empty-cell"></div>`;
-                });
-                
-                const isOwned = gameState.ownedCards.includes(card.id);
-                const isSold = card.sold || isOwned;
-                
-                cardEl.innerHTML = `
-                    <div class="card-header">Card #${card.id}</div>
-                    <div class="card-grid">
-                        ${gridHTML}
-                    </div>
-                    <div class="card-footer">
-                        <button class="buy-button" data-card-id="${card.id}" ${isSold ? 'disabled' : ''}>
-                            ${isSold ? translations[gameState.language].buyCards.sold : translations[gameState.language].buyCards.buyButton}
-                        </button>
-                    </div>
-                    ${isSold ? `<div class="sold-overlay">${translations[gameState.language].buyCards.sold}</div>` : ''}
-                `;
-                
-                // Add buy button event if not sold
-                if (!isSold) {
-                    cardEl.querySelector('.buy-button').addEventListener('click', function() {
-                        buyCard(parseInt(this.dataset.cardId));
-                    });
-                }
-                
-                container.appendChild(cardEl);
-            });
-        }
-        
-        // Buy a card
-        function buyCard(cardId) {
-            if (!gameState.walletConnected) {
-                alert("Please connect your wallet first");
-                return;
-            }
-            
-            // Check if user has joined Telegram group and channel
-            if (!gameState.hasJoinedGroup || !gameState.hasJoinedChannel) {
-                const t = translations[gameState.language].task;
-                alert(t.mustJoin);
-                showTaskModal();
-                return;
-            }
-            
-            if (gameState.tonBalance < 1) {
-                alert("Not enough TON balance");
-                return;
-            }
-            
-            if (gameState.hasPurchasedCard) {
-                alert("You can only purchase one card per game");
-                return;
-            }
-            
-            // Find the card
-            const card = gameState.allCards.find(c => c.id === cardId);
-            if (!card || card.sold) {
-                alert("This card is no longer available");
-                return;
-            }
-            
-            // Mark as sold
-            card.sold = true;
-            
-            // Simulate purchase
-            gameState.tonBalance -= 1;
-            gameState.ownedCards.push(cardId);
-            gameState.hasPurchasedCard = true;
-            
-            updateUI();
-            loadBuyCardsPage();
-            alert("Card purchased successfully!");
-        }
-        
-        // Load show cards page
-        function loadShowCardsPage() {
-            const container = document.getElementById('owned-cards-container');
-            container.innerHTML = '';
-            
-            if (gameState.ownedCards.length === 0) {
-                const t = translations[gameState.language].showCards;
-                container.innerHTML = `<p>${t.title} - You have no cards yet</p>`;
-                return;
-            }
-            
-            gameState.ownedCards.forEach(cardId => {
-                const card = gameState.allCards.find(c => c.id === cardId);
-                if (!card) return;
-                
-                const cardEl = document.createElement('div');
-                cardEl.className = 'tonbolla-card';
-                
-                let gridHTML = '';
-                card.numbers.forEach(num => {
-                    gridHTML += num 
-                        ? `<div class="number-cell">${num}</div>`
-                        : `<div class="number-cell empty-cell"></div>`;
-                });
-                
-                cardEl.innerHTML = `
-                    <div class="card-header">Card #${card.id}</div>
-                    <div class="card-grid">
-                        ${gridHTML}
-                    </div>
-                `;
-                
-                container.appendChild(cardEl);
-            });
-        }
-        
-        // Load winners page
-        function loadWinnersPage() {
-            const container = document.getElementById('winners-list');
-            container.innerHTML = '';
-            
-            gameState.winners.forEach(winner => {
-                const winnerEl = document.createElement('div');
-                winnerEl.className = 'tonbolla-card';
-                winnerEl.style.margin = '10px auto';
-                winnerEl.style.maxWidth = '500px';
-                
-                winnerEl.innerHTML = `
-                    <div style="display: flex; justify-content: space-between;">
-                        <div>${winner.address}</div>
-                        <div style="font-weight: bold;">${winner.prize}</div>
-                    </div>
-                `;
-                
-                container.appendChild(winnerEl);
-            });
-        }
-        
         // Update UI based on current state
         function updateUI() {
             const lang = gameState.language;
             const t = translations[lang];
             
-            // Update wallet info
-            if (gameState.walletConnected) {
-                document.getElementById('connect-wallet').textContent = t.wallet.connected;
-                document.getElementById('wallet-amount').textContent = 
-                    t.wallet.balance.replace('{balance}', gameState.tonBalance);
-            } else {
-                document.getElementById('connect-wallet').textContent = t.wallet.connect;
-                document.getElementById('wallet-amount').textContent = '0 TON';
-            }
+            // Update wallet info is handled separately
             
             // Update page titles
             document.getElementById('buy-cards-page').querySelector('.page-title').textContent = t.buyCards.title;
