@@ -492,6 +492,96 @@
             background-color: #2c3e50;
         }
         
+        /* اضافه کردن استایل برای مودال جدید */
+        .task-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.7);
+            z-index: 2000;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        .task-content {
+            background: #F5F0E6;
+            border-radius: 15px;
+            padding: 30px;
+            max-width: 90%;
+            width: 500px;
+            text-align: center;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+        
+        .task-title {
+            font-size: 1.8rem;
+            margin-bottom: 20px;
+            color: #2c3e50;
+        }
+        
+        .task-item {
+            display: flex;
+            align-items: center;
+            background: white;
+            margin: 15px 0;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: left;
+            box-shadow: 0 3px 6px rgba(0,0,0,0.1);
+        }
+        
+        .task-icon {
+            font-size: 2rem;
+            margin-right: 15px;
+            color: #3498db;
+        }
+        
+        .task-info {
+            flex: 1;
+        }
+        
+        .task-link {
+            display: block;
+            margin-top: 5px;
+            color: #3498db;
+            word-break: break-all;
+        }
+        
+        .join-btn {
+            background: #2c3e50;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        
+        .joined {
+            background: #d4edda;
+            color: #155724;
+            padding: 5px 10px;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        
+        .task-footer {
+            margin-top: 25px;
+        }
+        
+        .close-task {
+            background: #e74c3c;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        
         @keyframes fadeIn {
             from { opacity: 0; }
             to { opacity: 1; }
@@ -643,6 +733,37 @@
         </button>
     </div>
 
+    <!-- اضافه کردن مودال جدید برای Task -->
+    <div id="task-modal" class="task-modal">
+        <div class="task-content">
+            <div class="task-title">Join Tonbolla Community</div>
+            
+            <div class="task-item">
+                <i class="fab fa-telegram task-icon"></i>
+                <div class="task-info">
+                    <strong>Tonbolla Group</strong>
+                    <a href="https://t.me/tonbolla_game" target="_blank" class="task-link">https://t.me/tonbolla_game</a>
+                    <button class="join-btn" id="join-group-btn">I Joined</button>
+                    <div id="group-status"></div>
+                </div>
+            </div>
+            
+            <div class="task-item">
+                <i class="fab fa-telegram task-icon"></i>
+                <div class="task-info">
+                    <strong>Tonbolla Channel</strong>
+                    <a href="https://t.me/tonbolla_game" target="_blank" class="task-link">https://t.me/tonbolla_game</a>
+                    <button class="join-btn" id="join-channel-btn">I Joined</button>
+                    <div id="channel-status"></div>
+                </div>
+            </div>
+            
+            <div class="task-footer">
+                <button class="close-task" id="close-task-btn">Close</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Bottom Menu -->
     <div id="bottom-menu">
         <button class="menu-button" id="buy-card-btn" title="Buy Card">
@@ -681,7 +802,9 @@
             calledNumbers: [],
             currentPlayerCard: null,
             markedNumbers: [],
-            invitedFriends: 0
+            invitedFriends: 0,
+            hasJoinedGroup: localStorage.getItem('hasJoinedGroup') === 'true',
+            hasJoinedChannel: localStorage.getItem('hasJoinedChannel') === 'true'
         };
         
         // Translations (fixed for all languages)
@@ -726,6 +849,12 @@
                     matchFound: "Match found on your card!",
                     noMatch: "No match on your card",
                     gameOver: "Game Over!"
+                },
+                task: {
+                    title: "Join Tonbolla Community",
+                    joinGroup: "Join Telegram Group",
+                    joinChannel: "Join Telegram Channel",
+                    mustJoin: "You must join both Tonbolla Telegram group and channel before buying a card!"
                 }
             },
             fa: {
@@ -768,6 +897,12 @@
                     matchFound: "عدد در کارت شما پیدا شد!",
                     noMatch: "عددی در کارت شما یافت نشد",
                     gameOver: "پایان بازی!"
+                },
+                task: {
+                    title: "عضویت در جامعه تنبلا",
+                    joinGroup: "عضویت در گروه تلگرام",
+                    joinChannel: "عضویت در کانال تلگرام",
+                    mustJoin: "قبل از خرید کارت باید در گروه و کانال تلگرام تنبلا عضو شوید!"
                 }
             },
             hi: {
@@ -810,6 +945,12 @@
                     matchFound: "आपके कार्ड पर मिलान मिला!",
                     noMatch: "आपके कार्ड पर कोई मिलान नहीं",
                     gameOver: "खेल समाप्त!"
+                },
+                task: {
+                    title: "टोनबोला समुदाय में शामिल हों",
+                    joinGroup: "टेलीग्राम ग्रुप में शामिल हों",
+                    joinChannel: "टेलीग्राम चैनल में शामिल हों",
+                    mustJoin: "कार्ड खरीदने से पहले आपको टोनबोला टेलीग्राम ग्रुप और चैनल दोनों में शामिल होना होगा!"
                 }
             },
             ko: {
@@ -852,6 +993,12 @@
                     matchFound: "카드에 일치하는 번호 발견!",
                     noMatch: "카드에 일치하는 번호 없음",
                     gameOver: "게임 종료!"
+                },
+                task: {
+                    title: "Tonbolla 커뮤니티 가입",
+                    joinGroup: "텔레그램 그룹 가입",
+                    joinChannel: "텔레그램 채널 가입",
+                    mustJoin: "카드를 구매하기 전에 Tonbolla 텔레그램 그룹과 채널에 모두 가입해야 합니다!"
                 }
             },
             zh: {
@@ -894,6 +1041,12 @@
                     matchFound: "在您的卡牌上找到匹配！",
                     noMatch: "您的卡牌上没有匹配",
                     gameOver: "游戏结束！"
+                },
+                task: {
+                    title: "加入Tonbolla社区",
+                    joinGroup: "加入Telegram群组",
+                    joinChannel: "加入Telegram频道",
+                    mustJoin: "购买卡牌前您必须加入Tonbolla的Telegram群组和频道！"
                 }
             },
             fr: {
@@ -936,6 +1089,12 @@
                     matchFound: "Correspondance trouvée sur votre carte !",
                     noMatch: "Aucune correspondance sur votre carte",
                     gameOver: "Jeu terminé !"
+                },
+                task: {
+                    title: "Rejoindre la communauté Tonbolla",
+                    joinGroup: "Rejoindre le groupe Telegram",
+                    joinChannel: "Rejoindre la chaîne Telegram",
+                    mustJoin: "Vous devez rejoindre le groupe et la chaîne Telegram de Tonbolla avant d'acheter une carte !"
                 }
             },
             de: {
@@ -978,6 +1137,12 @@
                     matchFound: "Übereinstimmung auf Ihrer Karte gefunden!",
                     noMatch: "Keine Übereinstimmung auf Ihrer Karte",
                     gameOver: "Spiel beendet!"
+                },
+                task: {
+                    title: "Tonbolla-Community beitreten",
+                    joinGroup: "Telegram-Gruppe beitreten",
+                    joinChannel: "Telegram-Kanal beitreten",
+                    mustJoin: "Sie müssen der Tonbolla Telegram-Gruppe und dem Kanal beitreten, bevor Sie eine Karte kaufen können!"
                 }
             },
             ru: {
@@ -1020,6 +1185,12 @@
                     matchFound: "Совпадение найдено на вашей карте!",
                     noMatch: "На вашей карте нет совпадений",
                     gameOver: "Игра окончена!"
+                },
+                task: {
+                    title: "Присоединяйтесь к сообществу Tonbolla",
+                    joinGroup: "Присоединиться к группе в Telegram",
+                    joinChannel: "Присоединиться к каналу в Telegram",
+                    mustJoin: "Вы должны присоединиться к группе и каналу Tonbolla в Telegram, прежде чем покупать карту!"
                 }
             },
             ar: {
@@ -1062,6 +1233,12 @@
                     matchFound: "تم العثور على تطابق في بطاقتك!",
                     noMatch: "لا يوجد تطابق في بطاقتك",
                     gameOver: "انتهت اللعبة!"
+                },
+                task: {
+                    title: "انضم إلى مجتمع Tonbolla",
+                    joinGroup: "انضم إلى مجموعة Telegram",
+                    joinChannel: "انضم إلى قناة Telegram",
+                    mustJoin: "يجب أن تنضم إلى مجموعة وقناة Tonbolla على Telegram قبل شراء بطاقة!"
                 }
             }
         };
@@ -1096,8 +1273,23 @@
             document.getElementById('play-button').addEventListener('click', startGame);
             
             // Set up task button
-            document.getElementById('task-btn').addEventListener('click', function() {
-                alert("Task button clicked!");
+            document.getElementById('task-btn').addEventListener('click', showTaskModal);
+            
+            // Set up task modal buttons
+            document.getElementById('join-group-btn').addEventListener('click', function() {
+                gameState.hasJoinedGroup = true;
+                localStorage.setItem('hasJoinedGroup', 'true');
+                updateTaskModal();
+            });
+            
+            document.getElementById('join-channel-btn').addEventListener('click', function() {
+                gameState.hasJoinedChannel = true;
+                localStorage.setItem('hasJoinedChannel', 'true');
+                updateTaskModal();
+            });
+            
+            document.getElementById('close-task-btn').addEventListener('click', function() {
+                document.getElementById('task-modal').style.display = 'none';
             });
             
             // Set up copy invite button
@@ -1155,6 +1347,39 @@
             
             // Update current page
             gameState.currentPage = pageId;
+        }
+        
+        // Show task modal
+        function showTaskModal() {
+            const modal = document.getElementById('task-modal');
+            modal.style.display = 'flex';
+            updateTaskModal();
+        }
+        
+        // Update task modal status
+        function updateTaskModal() {
+            const groupStatus = document.getElementById('group-status');
+            const channelStatus = document.getElementById('channel-status');
+            
+            const t = translations[gameState.language].task;
+            
+            if (gameState.hasJoinedGroup) {
+                groupStatus.innerHTML = '<div class="joined">✓ Joined</div>';
+                document.getElementById('join-group-btn').style.display = 'none';
+            } else {
+                groupStatus.innerHTML = '';
+                document.getElementById('join-group-btn').style.display = 'block';
+                document.getElementById('join-group-btn').textContent = t.joinGroup;
+            }
+            
+            if (gameState.hasJoinedChannel) {
+                channelStatus.innerHTML = '<div class="joined">✓ Joined</div>';
+                document.getElementById('join-channel-btn').style.display = 'none';
+            } else {
+                channelStatus.innerHTML = '';
+                document.getElementById('join-channel-btn').style.display = 'block';
+                document.getElementById('join-channel-btn').textContent = t.joinChannel;
+            }
         }
         
         // Timer function - Updated to use UTC
@@ -1457,6 +1682,14 @@
         function buyCard(cardId) {
             if (!gameState.walletConnected) {
                 alert("Please connect your wallet first");
+                return;
+            }
+            
+            // Check if user has joined Telegram group and channel
+            if (!gameState.hasJoinedGroup || !gameState.hasJoinedChannel) {
+                const t = translations[gameState.language].task;
+                alert(t.mustJoin);
+                showTaskModal();
                 return;
             }
             
